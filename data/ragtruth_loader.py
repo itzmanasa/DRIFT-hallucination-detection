@@ -9,7 +9,6 @@ import json
 def load_source_info(path: str = "data/source_info.jsonl") -> dict:
     """
     Loads source_info.jsonl and indexes by source_id.
-    Returns dict mapping source_id -> source record.
     """
     sources = {}
     with open(path, "r", encoding="utf-8") as f:
@@ -25,7 +24,6 @@ def load_source_info(path: str = "data/source_info.jsonl") -> dict:
 def load_responses(path: str = "data/response.jsonl") -> list[dict]:
     """
     Loads response.jsonl.
-    Returns list of response records.
     """
     responses = []
     with open(path, "r", encoding="utf-8") as f:
@@ -39,126 +37,166 @@ def load_responses(path: str = "data/response.jsonl") -> list[dict]:
 
 def extract_question_from_prompt(prompt: str) -> str:
     """
-    Extracts the question Q from the prompt field.
-    RAGTruth prompt contains source text + instruction.
-    We extract the instruction part as the question.
+    Extracts the question from the RAGTruth prompt field.
     """
     if not prompt:
         return ""
-    
-    # The prompt ends with "output:" — question is the instruction line
     lines = prompt.strip().split("\n")
-    
-    # First line usually contains the task instruction
     for line in lines:
         line = line.strip()
-        if line and not line.startswith("output:"):
-            # Return first meaningful line as question
-            if len(line.split()) > 3:
-                return line
-    
+        if line and not line.startswith("output:") and len(line.split()) > 3:
+            return line
     return lines[0] if lines else ""
 
 
-def chunk_source_text(source_text: str, chunk_size: int = 200) -> list[str]:
+def chunk_source_text(source_text: str, chunk_size: int = 150) -> list[str]:
     """
-    Splits source_info text into chunks for retrieval.
-    Uses sentence boundaries where possible.
-    
-    Args:
-        source_text: full retrieved document text
-        chunk_size: approximate words per chunk
-    
-    Returns:
-        list of text chunks
+    Splits source text into chunks of approximately chunk_size words.
+    Handles RAGTruth QA passage format with "passage N:" headers.
     """
     if not source_text:
         return []
+
+    # Handle QA passage format — split on passage markers
+    import re
+    passage_pattern = re.compile(
+        r'passage\s+\d+\s*:', re.IGNORECASE
+    )
     
-    # Split on sentence boundaries
+    if passage_pattern.search(source_text):
+        # Split on passage markers
+        parts = passage_pattern.split(source_text)
+        chunks = []
+        for part in parts:
+            part = part.strip()
+            if part and len(part.split()) >= 5:
+                # Further split long passages
+                if len(part.split()) > chunk_size:
+                    sentences = []
+                    for sent in part.replace("\n", " ").split(". "):
+                        sent = sent.strip()
+                        if sent:
+                            sentences.append(sent)
+                    current = []
+                    current_words = 0
+                    for sent in sentences:
+                        current.append(sent)
+                        current_words += len(sent.split())
+                        if current_words >= chunk_size:
+                            chunks.append(". ".join(current) + ".")
+                            current = []
+                            current_words = 0
+                    if current:
+                        chunks.append(". ".join(current) + ".")
+                else:
+                    chunks.append(part)
+        if chunks:
+            return chunks
+
+    # Default chunking for non-QA formats
     sentences = []
-    current = []
-    
     for sentence in source_text.replace("\n", " ").split(". "):
         sentence = sentence.strip()
-        if not sentence:
-            continue
+        if sentence:
+            sentences.append(sentence)
+
+    chunks = []
+    current = []
+    current_words = 0
+
+    for sentence in sentences:
+        word_count = len(sentence.split())
         current.append(sentence)
-        
-        # Check if current chunk is large enough
-        word_count = sum(len(s.split()) for s in current)
-        if word_count >= chunk_size:
-            chunks_text = ". ".join(current) + "."
-            sentences.append(chunks_text)
+        current_words += word_count
+        if current_words >= chunk_size:
+            chunks.append(". ".join(current) + ".")
             current = []
-    
-    # Add remaining sentences
+            current_words = 0
+
     if current:
-        sentences.append(". ".join(current) + ".")
-    
-    return sentences
+        chunks.append(". ".join(current) + ".")
+
+    return chunks
+
+
+def extract_source_text(raw_source) -> str:
+    """
+    Handles different source_info formats across RAGTruth task types.
+    Summary: string
+    QA: dict with passage fields
+    Data2Text: dict or list
+    """
+    if isinstance(raw_source, str):
+        return raw_source
+    elif isinstance(raw_source, dict):
+        return " ".join(str(v) for v in raw_source.values())
+    elif isinstance(raw_source, list):
+        return " ".join(str(item) for item in raw_source)
+    else:
+        return str(raw_source)
 
 
 def build_samples(
     responses: list[dict],
     sources: dict,
     split: str = "test",
-    max_samples: int = None
+    max_samples: int = None,
+    task_type: str = None
 ) -> list[dict]:
     """
-    Joins responses and sources to build DRIFT-ready samples.
-    
-    Each sample contains:
-    - query_id: unique id
-    - question: Q
-    - chunks: D (list of text chunks)
-    - answer: A (LLM response)
-    - labels: ground truth hallucination spans
-    - model: which LLM
-    - task_type: Summary/QA/Data2Text
-    - is_hallucinated: response-level binary label
-    
-    Args:
-        responses: loaded response records
-        sources: loaded source records indexed by source_id
-        split: filter by split (train/test/all)
-        max_samples: limit number of samples (None = all)
-    
-    Returns:
-        list of DRIFT-ready sample dicts
+    Joins responses and sources into DRIFT-ready samples.
     """
     samples = []
-    
+
     for resp in responses:
         # Filter by split
         if split != "all" and resp.get("split", "") != split:
             continue
-        
+
         source_id = resp.get("source_id", "")
         source = sources.get(source_id, {})
-        
+
         if not source:
             continue
-        
+
+        # Filter by task type
+        if task_type:
+            source_task = source.get("task_type", "").strip().lower()
+            filter_task = task_type.strip().lower()
+            if source_task != filter_task:
+                continue
+
         # Extract Q
-        question = extract_question_from_prompt(
-            source.get("prompt", "")
-        )
-        
-        # Extract D — chunk the source text
-        source_text = source.get("source_info", "")
+        question = extract_question_from_prompt(source.get("prompt", ""))
+
+        # Extract D
+        raw_source = source.get("source_info", "")
+        source_text = extract_source_text(raw_source)
         chunks = chunk_source_text(source_text)
-        
+
         # Extract A
         answer = resp.get("response", "")
-        
+
         # Extract labels
         labels = resp.get("labels", [])
-        
-        # Skip samples missing core fields
+
+        # Skip incomplete samples
+        # Skip incomplete samples
         if not question or not chunks or not answer:
             continue
         
+        # Skip refusal responses — not hallucinations
+        refusal_phrases = [
+            "unable to answer",
+            "cannot answer", 
+            "not enough information",
+            "no information provided",
+            "based on the given passages, i cannot",
+            "the passages do not"
+        ]
+        if any(phrase in answer.lower() for phrase in refusal_phrases):
+            continue
+
         sample = {
             "query_id": f"ragtruth_{resp['id']}",
             "question": question,
@@ -169,70 +207,52 @@ def build_samples(
             "task_type": source.get("task_type", "unknown"),
             "is_hallucinated": 1 if len(labels) > 0 else 0
         }
-        
+
         samples.append(sample)
-        
+
         if max_samples and len(samples) >= max_samples:
             break
-    
+
     return samples
 
 
 def load_ragtruth(
     split: str = "test",
-    max_samples: int = None
+    max_samples: int = None,
+    task_type: str = None
 ) -> list[dict]:
     """
-    Main loader function. Returns DRIFT-ready samples.
-    
+    Main loader. Returns DRIFT-ready RAGTruth samples.
+
     Args:
         split: "train", "test", or "all"
-        max_samples: limit samples for quick testing
-    
+        max_samples: limit samples (None = all)
+        task_type: "QA", "Summary", "Data2Text", or None for all
+
     Returns:
-        list of DRIFT-ready sample dicts
+        list of sample dicts with Q, D, A, labels
     """
     sources = load_source_info()
     responses = load_responses()
-    samples = build_samples(responses, sources, split, max_samples)
-    
-    print(f"\nBuilt {len(samples)} {split} samples")
+    samples = build_samples(responses, sources, split, max_samples, task_type)
+    print(f"Built {len(samples)} {split} samples "
+          f"({'all tasks' if not task_type else task_type})")
     return samples
 
 
-def print_sample(sample: dict):
-    """Pretty prints one sample."""
-    print("=" * 60)
-    print(f"Query ID : {sample['query_id']}")
-    print(f"Model    : {sample['model']}")
-    print(f"Task     : {sample['task_type']}")
-    print(f"Label    : {'HALLUCINATED' if sample['is_hallucinated'] else 'CLEAN'}")
-    print(f"\nQuestion : {sample['question'][:150]}...")
-    print(f"\nChunks   : {len(sample['chunks'])} chunks")
-    for i, chunk in enumerate(sample['chunks'][:2]):
-        print(f"  [{i+1}] {chunk[:100]}...")
-    print(f"\nAnswer   : {sample['answer'][:200]}...")
-    print(f"\nLabels   : {len(sample['labels'])} hallucinated spans")
-    print("=" * 60)
-
-
 if __name__ == "__main__":
-    # Load small sample first to verify
-    samples = load_ragtruth(split="test", max_samples=50)
-    
+    samples = load_ragtruth(split="test", max_samples=10, task_type="QA")
     if samples:
-        print("\nFirst sample:")
-        print_sample(samples[0])
-        
-        # Statistics
+        s = samples[0]
+        print(f"\nSample preview:")
+        print(f"  Query ID : {s['query_id']}")
+        print(f"  Model    : {s['model']}")
+        print(f"  Task     : {s['task_type']}")
+        print(f"  Chunks   : {len(s['chunks'])}")
+        print(f"  Label    : {'HALLUCINATED' if s['is_hallucinated'] else 'CLEAN'}")
+        print(f"  Question : {s['question'][:100]}")
+        print(f"  Answer   : {s['answer'][:150]}")
+
         hallucinated = sum(s["is_hallucinated"] for s in samples)
-        models = set(s["model"] for s in samples)
-        tasks = set(s["task_type"] for s in samples)
-        
-        print(f"\nSample statistics:")
-        print(f"  Total        : {len(samples)}")
-        print(f"  Hallucinated : {hallucinated} "
-              f"({hallucinated/len(samples)*100:.1f}%)")
-        print(f"  Clean        : {len(samples) - hallucinated}")
-        print(f"  Models       : {models}")
-        print(f"  Task types   : {tasks}")
+        print(f"\nStats: {len(samples)} samples, "
+              f"{hallucinated} hallucinated")

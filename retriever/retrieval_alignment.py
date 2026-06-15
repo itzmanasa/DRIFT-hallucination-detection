@@ -3,8 +3,8 @@ os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 import warnings
 warnings.filterwarnings("ignore")
 
-from sentence_transformers import SentenceTransformer
 import numpy as np
+from sentence_transformers import SentenceTransformer
 
 # Load embedding model once at module level
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
@@ -14,29 +14,29 @@ embedder = SentenceTransformer(EMBEDDING_MODEL)
 def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
     """
     Computes cosine similarity between two vectors.
-    Returns value between 0 and 1.
+    Returns value in [-1, 1], clipped to [0, 1].
     """
-    dot_product = np.dot(vec1, vec2)
     norm1 = np.linalg.norm(vec1)
     norm2 = np.linalg.norm(vec2)
-    
     if norm1 == 0 or norm2 == 0:
         return 0.0
-    
-    return dot_product / (norm1 * norm2)
+    sim = np.dot(vec1, vec2) / (norm1 * norm2)
+    return float(np.clip(sim, 0.0, 1.0))
 
 
 def embed_chunks(chunks: list[str]) -> np.ndarray:
     """
     Embeds all chunks once and returns embedding matrix.
-    Call this once per query, not once per span.
-    
+    Call once per query — reuse for all spans in that query.
+
     Args:
-        chunks: list of text chunks from D
-    
+        chunks: list of text chunks D
+
     Returns:
         numpy array of shape (num_chunks, embedding_dim)
     """
+    if not chunks:
+        return np.array([])
     embeddings = embedder.encode(chunks, convert_to_numpy=True)
     return embeddings
 
@@ -49,59 +49,66 @@ def get_top_k_chunks(
 ) -> list[str]:
     """
     Transformation 2 — Retrieval Alignment.
-    Finds the top-k most semantically similar chunks to a DriftSpan.
-    
+    Returns top-k most semantically similar chunks to a DriftSpan.
+
+    Why cosine similarity: captures semantic meaning not just
+    keyword overlap. Two chunks about the same topic but different
+    words will still score high.
+
+    Why k=3: minimum needed for cross-chunk contradiction signal
+    to compare across chunks. k>5 introduces noise from irrelevant
+    chunks.
+
     Args:
-        span: one DriftSpan string (si)
-        chunks: list of all retrieved chunks (D)
-        chunk_embeddings: precomputed embeddings for all chunks
-        k: number of top chunks to return (default 3)
-    
+        span: one DriftSpan string si
+        chunks: all retrieved chunks D
+        chunk_embeddings: precomputed embeddings for D
+        k: number of top chunks to return
+
     Returns:
         Di — list of top-k most relevant chunks for this span
     """
+    if not chunks or len(chunk_embeddings) == 0:
+        return []
+
     # Embed the span
     span_embedding = embedder.encode(span, convert_to_numpy=True)
-    
+
     # Compute cosine similarity between span and every chunk
     similarities = []
     for i, chunk_emb in enumerate(chunk_embeddings):
         sim = cosine_similarity(span_embedding, chunk_emb)
         similarities.append((i, sim))
-    
-    # Sort by similarity descending
+
+    # Sort descending by similarity
     similarities.sort(key=lambda x: x[1], reverse=True)
-    
+
     # Return top-k chunks
-    top_k_indices = [idx for idx, sim in similarities[:k]]
-    top_k_chunks = [chunks[idx] for idx in top_k_indices]
-    
-    return top_k_chunks
+    actual_k = min(k, len(chunks))
+    top_k_indices = [idx for idx, sim in similarities[:actual_k]]
+    return [chunks[idx] for idx in top_k_indices]
 
 
 if __name__ == "__main__":
-    # Test with example data
     test_spans = [
         "The drug was approved by FDA in 2022",
         "The drug had no serious side effects"
     ]
-    
+
     test_chunks = [
-        "The FDA granted approval to the medication in late 2022 after reviewing trial data.",
+        "The FDA granted approval to the medication in late 2022.",
         "Manufacturing of the drug began in 2021 at facilities in New Jersey.",
-        "Clinical trials reported minimal adverse events with no serious complications observed.",
-        "The drug showed strong efficacy in reducing fever symptoms across age groups.",
-        "Regulatory bodies in Europe are still reviewing the drug for approval."
+        "Clinical trials reported minimal adverse events with no serious complications.",
+        "The drug showed strong efficacy in reducing fever symptoms.",
+        "Regulatory bodies in Europe are still reviewing the drug."
     ]
-    
+
     print("Precomputing chunk embeddings...")
     chunk_embeddings = embed_chunks(test_chunks)
-    print(f"Embedded {len(test_chunks)} chunks\n")
-    
+
     for span in test_spans:
-        print(f"DriftSpan: {span}")
+        print(f"\nDriftSpan: {span}")
         di = get_top_k_chunks(span, test_chunks, chunk_embeddings, k=3)
-        print(f"Top-3 relevant chunks (Di):")
+        print("Top-3 chunks (Di):")
         for j, chunk in enumerate(di):
-            print(f"  chunk {j+1}: {chunk}")
-        print()
+            print(f"  [{j+1}] {chunk}")
