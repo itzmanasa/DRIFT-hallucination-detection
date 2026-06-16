@@ -12,10 +12,15 @@ from rouge_score import rouge_scorer
 # - Returns clean label names: entailment, neutral, contradiction
 # - Works correctly on CPU and GPU
 # - Confirmed returning entailment: 0.998 for grounded spans
+import torch
+
 NLI_MODEL = "cross-encoder/nli-deberta-v3-base"
+DEVICE = 0 if torch.cuda.is_available() else -1
+
 nli_pipeline = pipeline(
     "text-classification",
-    model=NLI_MODEL
+    model=NLI_MODEL,
+    device=DEVICE
 )
 
 # ROUGE scorer for lexical divergence

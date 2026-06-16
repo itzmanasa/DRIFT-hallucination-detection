@@ -7,8 +7,11 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 # Load embedding model once at module level
+import torch
+
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-embedder = SentenceTransformer(EMBEDDING_MODEL)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+embedder = SentenceTransformer(EMBEDDING_MODEL, device=DEVICE)
 
 
 def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
