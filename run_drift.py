@@ -254,7 +254,7 @@ if __name__ == "__main__":
         max_samples=20,
         task_type="QA",
         k=3,
-        threshold=0.3,
+        threshold=0.35,
         alpha=0.1,
         save_results=True
     )
