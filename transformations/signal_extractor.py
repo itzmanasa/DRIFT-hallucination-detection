@@ -144,7 +144,7 @@ def get_cross_chunk_contradiction_flag(
         for item in result:
             label = item["label"].upper()
             if label in ("CONTRADICTION", "LABEL_2", "CONTRADICT"):
-                if item["score"] > 0.90: 
+                if item["score"] > 0.85: 
                     return 1
 
     return 0
