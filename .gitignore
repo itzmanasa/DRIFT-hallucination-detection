@@ -22,3 +22,10 @@ results/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Dataset files - too large and not ours to redistribute
+data/response.jsonl
+data/source_info.jsonl
+
+# Zip files
+*.zip
