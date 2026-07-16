@@ -1,47 +1,98 @@
 # DRIFT: Detection and Reasoning for Identified Fabrication Traces
 
-A zero-shot, black-box framework for span-level hallucination 
-detection in Retrieval-Augmented Generation (RAG) systems.
+DRIFT is a **zero-shot, black-box framework** for **span-level hallucination detection** in Retrieval-Augmented Generation (RAG) systems. Instead of assigning a single hallucination label to an entire response, DRIFT decomposes responses into atomic factual claims (DriftSpans) and evaluates each claim individually against retrieved evidence.
+
+---
 
 ## Overview
 
-DRIFT decomposes LLM-generated answers into atomic factual 
-units called DriftSpans and evaluates each against retrieved 
-evidence using three complementary signals:
-- NLI Entailment Score
-- Lexical Divergence Rate  
-- Cross-Chunk Contradiction Flag
+DRIFT operates in four stages:
 
-These signals are fused into a per-span Drift Index (DI) score.
+1. **DriftSpan Decomposition** – Splits an LLM-generated response into atomic factual claims.
+2. **Retrieval Alignment** – Retrieves the most relevant evidence chunks for each claim.
+3. **Tri-Signal Extraction** – Computes three complementary grounding signals:
+   - **NLI Entailment Score**
+   - **Lexical Divergence Rate**
+   - **Cross-Chunk Contradiction Flag**
+4. **Drift Index Computation** – Fuses the three signals into a per-span **Drift Index (DI)** to classify grounded and hallucinated claims.
 
-## Results
+---
 
-Evaluated on RAGTruth test split (2,574 samples, 6 LLMs):
-- Response-level F1: 0.5559
-- Outperforms all zero-shot baselines including GPT-4 (F1=0.476)
+## Experimental Results
 
-## Setup
+Evaluated on the **RAGTruth** benchmark:
 
-### Requirements
-- Python 3.11
-- See requirements.txt for dependencies
+| Metric | Value |
+|---------|------:|
+| Dataset | RAGTruth Test Split |
+| Samples | 2,574 |
+| LLMs | 6 |
+| Response-Level F1 | **0.5559** |
+| Best News Summarization F1 | **0.3812** |
+| Best Model (News) | Mistral-7B (**0.6429**) |
 
-### Installation
+DRIFT outperforms all existing **zero-shot** baselines, including GPT-4 prompted hallucination detection.
+
+---
+
+# Installation
+
+## Requirements
+
+- Python 3.11+
+- CUDA-compatible GPU (recommended)
+- See `requirements.txt` for all dependencies.
+
+## Clone Repository
+
 ```bash
 git clone https://github.com/YOUR_USERNAME/DRIFT.git
 cd DRIFT
+```
+
+## Create Virtual Environment
+
+### Windows
+
+```bash
 python -m venv venv
-venv\Scripts\activate  # Windows
+venv\Scripts\activate
+```
+
+### Linux / macOS
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+## Install Dependencies
+
+```bash
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 ```
 
-### Dataset
-See data/README.md for dataset download instructions.
+---
 
-## Usage
+# Dataset
 
-### Run DRIFT on RAGTruth
+DRIFT is evaluated using the **RAGTruth** benchmark.
+
+Please follow the instructions in
+
+```
+data/README.md
+```
+
+to download and prepare the dataset.
+
+---
+
+# Usage
+
+## Run Full Evaluation
+
 ```python
 from run_drift import run_experiment
 
@@ -56,29 +107,62 @@ run_experiment(
 )
 ```
 
-### Run on specific domain
+---
+
+## Run a Specific Task
+
 ```python
 run_experiment(
     split="test",
-    task_type="Summary",  # QA, Summary, or Data2Text
+    task_type="Summary",      # QA | Summary | Data2Text
     save_results=True
 )
 ```
 
-## Project Structure
-DRIFT/
-├── data/                  # Dataset loader
-├── retriever/             # Retrieval alignment
-├── transformations/       # Decomposer + signal extractor
-├── detector/              # Drift Index computation
-├── evaluation/            # Metrics
-├── results/               # Experimental results
-└── run_drift.py           # Main pipeline
+---
 
-## Models Used
-- NLI: cross-encoder/nli-deberta-v3-base
-- Embeddings: all-MiniLM-L6-v2
-- Decomposition: spaCy en_core_web_sm
+# Project Structure
+
+```
+DRIFT/
+│
+├── data/                    # Dataset loader and preprocessing
+├── retriever/               # Retrieval alignment
+├── transformations/         # DriftSpan decomposition & signal extraction
+├── detector/                # Drift Index computation
+├── evaluation/              # Evaluation metrics
+├── results/                 # Experimental outputs
+├── run_drift.py             # Main experiment pipeline
+└── requirements.txt         # Project dependencies
+```
+
+---
+
+# Models
+
+| Component | Model |
+|----------|------------------------------|
+| NLI | cross-encoder/nli-deberta-v3-base |
+| Embeddings | all-MiniLM-L6-v2 |
+| Dependency Parsing | spaCy en_core_web_sm |
+
+---
 
 ## Citation
-[Paper citation will go here after publication]
+
+Citation information will be added after publication.
+```
+
+(Update the citation after publication.)
+
+---
+
+# License
+
+Specify the project license here (e.g., MIT, Apache-2.0, or BSD-3-Clause).
+
+---
+
+# Acknowledgements
+
+This work was developed as part of the **CoDMAV Research Internship** at **PES University**.
