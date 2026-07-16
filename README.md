@@ -153,8 +153,6 @@ DRIFT/
 Citation information will be added after publication.
 ```
 
-(Update the citation after publication.)
-
 ---
 
 # License
