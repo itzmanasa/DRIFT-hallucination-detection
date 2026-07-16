@@ -155,9 +155,6 @@ Citation information will be added after publication.
 
 ---
 
-# License
-
-Specify the project license here (e.g., MIT, Apache-2.0, or BSD-3-Clause).
 
 ---
 
